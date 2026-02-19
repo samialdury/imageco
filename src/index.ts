@@ -81,7 +81,7 @@ const args = parseArgs({
 
 const opts = {
 	input: path.resolve(args.values.input),
-	ouput: path.resolve(args.values.output),
+	output: path.resolve(args.values.output),
 	quality: parseInt(args.values.quality, 10),
 	format: args.values.format.toLowerCase() as OutputExtension,
 }
@@ -140,7 +140,7 @@ const files = [] as {
 }[]
 
 for await (const p of walk(opts.input)) {
-	const ext = path.extname(p).split('.').at(1)
+	const ext = path.extname(p).split('.').at(1)?.toLowerCase()
 
 	if (!ext) continue
 	// if (!supportedExtensions.has(ext as never)) continue
@@ -157,9 +157,11 @@ for await (const p of walk(opts.input)) {
 
 d('collected files: %O', files)
 
+let converted = 0
+let skipped = 0
 for (const f of files) {
-	const b = debug('imageco:' + f.id)
-	let outputPath = f.path.replace('input', 'output')
+	const b = debug('imageco:convert')
+	let outputPath = f.path.replace(opts.input, opts.output)
 	const outputDir = path.dirname(outputPath)
 
 	if (!fs.existsSync(outputDir)) {
@@ -170,6 +172,7 @@ for (const f of files) {
 	if (!inputExtensions.has(f.type)) {
 		b('unsuported file %s, copying as is', f.path)
 		await fs.promises.copyFile(f.path, outputPath)
+		skipped++
 		continue
 	}
 
@@ -199,8 +202,22 @@ for (const f of files) {
 	el.reduction = decrease
 	el.reductionPercent = Math.round((decrease / el.originalSize) * 100)
 	el.formattedReduction = filesize(el.reduction)
+	converted++
 }
 
-console.table(files)
+console.table(
+	files.map((f) => ({
+		path: f.path,
+		originalSize: f.originalSize,
+		newSize: f.newSize,
+		reduction: f.reduction,
+		reductionPercent: f.reductionPercent,
+	})),
+)
 
-console.log(styleText('green', 'All done!'))
+console.log(
+	styleText(
+		'green',
+		`All done! ${converted} files converted, ${skipped} files skipped.`,
+	),
+)
