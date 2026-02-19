@@ -18,11 +18,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-CLI entry point in `src/index.ts` with shared types and constants extracted to `src/utils.ts`. The flow is:
-1. Parse CLI args with `node:util.parseArgs` (input dir, output dir, quality, format)
-2. Validate options (format must be webp/avif, quality 1-100, input dir must exist)
-3. Recursively walk input directory, collecting all files
-4. For each file: if extension is supported (png/jpg/jpeg/webp), convert with sharp to target format; otherwise copy as-is to output dir preserving directory structure
+CLI entry point in `src/index.ts` with shared types and constants extracted to `src/utils.ts`. Two modes:
+
+- **File mode**: positional args (`imageco photo.png screenshot.jpg`) — converts specific files
+- **Directory mode**: `--input`/`--output` flags — recursively walks input dir
+
+The flow is:
+1. Parse CLI args with `node:util.parseArgs` (positional files or input dir, output dir, quality, format)
+2. Validate options (format must be webp/avif, quality 1-100, input dir/files must exist)
+3. Collect files — either from positional args (file mode) or by recursively walking input directory (directory mode)
+4. For each file: if extension is supported (png/jpg/jpeg/webp), convert with sharp to target format; otherwise copy as-is (dir mode) or skip (file mode)
 5. Print results table and summary
 
 ## Key Details
@@ -32,3 +37,4 @@ CLI entry point in `src/index.ts` with shared types and constants extracted to `
 - Package manager: pnpm
 - Node >= 20 required
 - ESM (`"type": "module"`)
+- Tests use bun's built-in test runner (`bun:test`) — unit tests in `tests/utils.test.ts`, integration tests in `tests/cli.test.ts`
