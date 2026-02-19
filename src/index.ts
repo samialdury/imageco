@@ -28,13 +28,11 @@ const options = {
 	input: {
 		type: 'string',
 		short: 'i',
-		default: path.join(cwd, 'input'),
 		help: 'Input directory',
 	},
 	output: {
 		type: 'string',
 		short: 'o',
-		default: path.join(cwd, 'output'),
 		help: 'Output directory',
 	},
 	quality: {
@@ -52,18 +50,34 @@ const options = {
 } satisfies CLIOptions
 
 function help() {
-	let out = `imageco [ARGS?] [...OPTS?]\n`
+	let out = `imageco [FILES...] [...OPTS?]\n`
 
-	out += `\nargs:
+	out += `\nConvert specific files or entire directories of images.\n`
+
+	out += `\nusage:
+  imageco photo.png screenshot.jpg -q 80 -f avif   Convert specific files
+  imageco photo.png -o ./out -f webp                Convert to output directory
+  imageco -i ./photos -o ./compressed -q 60         Convert entire directory
+  imageco                                           Convert ./input to ./output`
+
+	out += `\n\nargs:
 help:
 \tShow help.`
 
 	out += `\n\noptions:`
+
+	const defaults: Record<string, string> = {
+		input: './input',
+		output: './output (dir mode) or same directory (file mode)',
+		quality: '50',
+		format: 'avif',
+	}
+
 	for (const [k, o] of Object.entries(options)) {
 		out += `
 --${k} (-${o.short}):
 \t${o.help}.
-\tDefault: ${o.default}\n`
+\tDefault: ${defaults[k]}\n`
 	}
 
 	return out
@@ -77,13 +91,26 @@ if (ogArgs[0] === 'help') {
 const args = parseArgs({
 	options,
 	args: ogArgs,
+	allowPositionals: true,
 })
 
+const fileMode = args.positionals.length > 0
+
+function resolveOutput(): string | undefined {
+	if (args.values.output !== undefined) {
+		return path.resolve(args.values.output)
+	}
+	if (fileMode) {
+		return undefined
+	}
+	return path.resolve(cwd, 'output')
+}
+
 const opts = {
-	input: path.resolve(args.values.input),
-	output: path.resolve(args.values.output),
-	quality: parseInt(args.values.quality, 10),
-	format: args.values.format.toLowerCase() as OutputExtension,
+	input: fileMode ? undefined : path.resolve(args.values.input ?? path.join(cwd, 'input')),
+	output: resolveOutput(),
+	quality: parseInt(args.values.quality!, 10),
+	format: args.values.format!.toLowerCase() as OutputExtension,
 }
 
 d('args: %O', args.values)
@@ -104,10 +131,18 @@ function validate() {
 		)
 	}
 
-	if (!fs.existsSync(opts.input)) {
-		validationErrors.push(
-			`${opts.input} does not exist.\nYou can set the input directory with the \`--input\` option.\nFor more info, run \`imageco help\`.`,
-		)
+	if (fileMode) {
+		for (const filePath of args.positionals) {
+			if (!fs.existsSync(path.resolve(filePath))) {
+				validationErrors.push(`File "${filePath}" does not exist.`)
+			}
+		}
+	} else {
+		if (!fs.existsSync(opts.input!)) {
+			validationErrors.push(
+				`${opts.input} does not exist.\nYou can set the input directory with the \`--input\` option.\nFor more info, run \`imageco help\`.`,
+			)
+		}
 	}
 
 	return validationErrors
@@ -128,8 +163,7 @@ async function* walk(dir: string) {
 	}
 }
 
-const files = [] as {
-	id: string
+interface FileEntry {
 	type: InputExtension
 	path: string
 	originalSize: number
@@ -137,41 +171,74 @@ const files = [] as {
 	reduction?: number
 	reductionPercent?: number
 	formattedReduction?: string
-}[]
-
-for await (const p of walk(opts.input)) {
-	const ext = path.extname(p).split('.').at(1)?.toLowerCase()
-
-	if (!ext) continue
-	// if (!supportedExtensions.has(ext as never)) continue
-
-	const stat = await fs.promises.stat(p)
-
-	files.push({
-		id: crypto.randomUUID(),
-		type: ext as InputExtension,
-		path: p,
-		originalSize: stat.size,
-	})
 }
 
+function getExtension(filePath: string): string | undefined {
+	const ext = path.extname(filePath).slice(1).toLowerCase()
+	return ext || undefined
+}
+
+async function collectFileEntry(filePath: string): Promise<FileEntry | undefined> {
+	const ext = getExtension(filePath)
+	if (!ext) return undefined
+
+	const stat = await fs.promises.stat(filePath)
+	return {
+		type: ext as InputExtension,
+		path: filePath,
+		originalSize: stat.size,
+	}
+}
+
+async function collectFiles(): Promise<FileEntry[]> {
+	const entries: FileEntry[] = []
+
+	if (fileMode) {
+		for (const filePath of args.positionals) {
+			const entry = await collectFileEntry(path.resolve(filePath))
+			if (entry) entries.push(entry)
+		}
+	} else {
+		for await (const p of walk(opts.input!)) {
+			const entry = await collectFileEntry(p)
+			if (entry) entries.push(entry)
+		}
+	}
+
+	return entries
+}
+
+const files = await collectFiles()
+
 d('collected files: %O', files)
+
+function resolveOutputPath(filePath: string): string {
+	if (fileMode) {
+		return opts.output ? path.join(opts.output, path.basename(filePath)) : filePath
+	}
+	return filePath.replace(opts.input!, opts.output!)
+}
 
 let converted = 0
 let skipped = 0
 for (const f of files) {
 	const b = debug('imageco:convert')
-	let outputPath = f.path.replace(opts.input, opts.output)
+	let outputPath = resolveOutputPath(f.path)
 	const outputDir = path.dirname(outputPath)
 
 	if (!fs.existsSync(outputDir)) {
 		fs.mkdirSync(outputDir, { recursive: true })
 	}
 
-	// Copy the file as is, if not supported
 	if (!inputExtensions.has(f.type)) {
-		b('unsuported file %s, copying as is', f.path)
-		await fs.promises.copyFile(f.path, outputPath)
+		if (fileMode) {
+			console.log(
+				styleText('yellow', `Skipping unsupported file: ${f.path}`),
+			)
+		} else {
+			b('unsupported file %s, copying as is', f.path)
+			await fs.promises.copyFile(f.path, outputPath)
+		}
 		skipped++
 		continue
 	}
@@ -193,15 +260,11 @@ for (const f of files) {
 	})
 	b('%s converted and compressed', f.path)
 
-	const idx = files.findIndex((file) => file.id === f.id)!
-	const el = files[idx]!
-
-	const newSize = info.size
-	const decrease = el.originalSize - newSize
-	el.newSize = newSize
-	el.reduction = decrease
-	el.reductionPercent = Math.round((decrease / el.originalSize) * 100)
-	el.formattedReduction = filesize(el.reduction)
+	const decrease = f.originalSize - info.size
+	f.newSize = info.size
+	f.reduction = decrease
+	f.reductionPercent = Math.round((decrease / f.originalSize) * 100)
+	f.formattedReduction = filesize(decrease)
 	converted++
 }
 
