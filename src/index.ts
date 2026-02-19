@@ -1,24 +1,24 @@
-import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import { parseArgs, styleText, type ParseArgsOptionDescriptor } from 'node:util'
 import debug from 'debug'
 import sharp from 'sharp'
 import { filesize } from 'filesize'
+import {
+	inputExtensions,
+	type InputExtension,
+	OUTPUT_EXTENSIONS,
+	outputExtensions,
+	type OutputExtension,
+	type FileEntry,
+	getExtension,
+} from './utils.js'
 
 const d = debug('imageco:main')
 
 const cwd = process.cwd()
 
 const ogArgs = process.argv.slice(2)
-
-const INPUT_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const
-const inputExtensions = new Set(INPUT_EXTENSIONS)
-type InputExtension = (typeof INPUT_EXTENSIONS)[number]
-
-const OUTPUT_EXTENSIONS = ['webp', 'avif'] as const
-const outputExtensions = new Set(OUTPUT_EXTENSIONS)
-type OutputExtension = (typeof OUTPUT_EXTENSIONS)[number]
 
 interface CLIOptions {
 	[longOption: string]: ParseArgsOptionDescriptor & { help: string }
@@ -163,20 +163,6 @@ async function* walk(dir: string) {
 	}
 }
 
-interface FileEntry {
-	type: InputExtension
-	path: string
-	originalSize: number
-	newSize?: number
-	reduction?: number
-	reductionPercent?: number
-	formattedReduction?: string
-}
-
-function getExtension(filePath: string): string | undefined {
-	const ext = path.extname(filePath).slice(1).toLowerCase()
-	return ext || undefined
-}
 
 async function collectFileEntry(filePath: string): Promise<FileEntry | undefined> {
 	const ext = getExtension(filePath)

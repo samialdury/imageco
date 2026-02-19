@@ -13,13 +13,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Run (dev):** `pnpm run dev -- [args]`
 - **Debug:** `pnpm run dev:debug -- [args]` (enables `DEBUG=imageco:*`)
 - **Format:** `pnpm run format` (prettier)
+- **Test:** `pnpm test` (runs `bun test` -- unit + integration tests in `tests/`)
 - **Release:** `pnpm run release:patch` / `release:minor` / `release:major` (builds, formats, versions, publishes to npm, creates GitHub release)
-
-No test suite exists.
 
 ## Architecture
 
-Single-file CLI in `src/index.ts`. The flow is:
+CLI entry point in `src/index.ts` with shared types and constants extracted to `src/utils.ts`. The flow is:
 1. Parse CLI args with `node:util.parseArgs` (input dir, output dir, quality, format)
 2. Validate options (format must be webp/avif, quality 1-100, input dir must exist)
 3. Recursively walk input directory, collecting all files
